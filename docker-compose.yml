@@ -1,0 +1,21 @@
+version: '3.7'
+
+services:
+
+  stardog:
+    image: stardog/stardog:latest
+    env_file: .env
+    environment:
+      - STARDOG_EXT=/var/opt/stardog-ext
+      - STARDOG_HOME=/home/admin/grafbook/data/stardog
+    ports:
+      - "5820:5820"
+    volumes:
+      - ./data/stardog/:/var/opt/stardog/
+      - ./data/stardog/stardog-ext/:/var/opt/stardog-ext
+    restart: "unless-stopped"
+    networks:
+      - datadog
+
+networks:
+  datadog:
