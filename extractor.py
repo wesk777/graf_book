@@ -1,121 +1,130 @@
-def extract_entities(filename):
-    # Анна Каренина Л. Н. Толстой (версия 1) 
+# Анна Каренина Л. Н. Толстой (версия 1) 
 
-    ### Извлекаем именованные сущности: Имена, Места, Названия, с помощью библиотек navec и slovnet
-    #### Формируем json файл с триплетами: type: PER/LOC/ORG, name, context.
+### Извлекаем именованные сущности: Имена, Места, Названия, с помощью библиотек navec и slovnet
+#### Формируем json файл с триплетами: type: PER/LOC/ORG, name, context.
 
-    ##### Установка необходимых библиотек
+##### Установка необходимых библиотек
 
-    # pip install slovnet
-    # pip install ipymarkup
-    # pip install pymorphy2
-    # pip install natasha
-    # import json
+# pip install slovnet
+# pip install ipymarkup
+# pip install pymorphy2
+# pip install natasha
+# import json
 
-        
+    
 
-    from navec import Navec
-    from slovnet import NER
-    from ipymarkup import show_span_ascii_markup as show_markup
-    import pymorphy2
-    from natasha import Segmenter, Doc
+from navec import Navec
+from slovnet import NER
+from ipymarkup import show_span_ascii_markup as show_markup
+import pymorphy2
+from natasha import Segmenter, Doc
+import logging
 
-    ##### Загружаем txt файл для разметки
 
-    #INPUT_FILENAME = 'anna-karenina.txt'
-    INPUT_FILENAME = filename
+MORPH = pymorphy2.MorphAnalyzer()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def read_file(filename: str) -> str: #файл в формате txt  # ВОТ ТУТ ВОПРОСИКИ ?????????????
+
     text = ''
-    with open(INPUT_FILENAME, 'r', encoding='utf-8', errors='ignore') as f:
+    with open(filename, 'r', encoding='utf-8', errors='ignore') as f:
         for line in f:      
-            text += line
+            text += line    
+    logger.info('-----------------------------Файл прочитал---------------------------------------')
+    return text
 
-    ##### Используем предобучение модели из библиотеки Natasha
+# Лемматизация слова
+def lemmatization_of_word(text: str) -> str:
+    words = text.split() # разбиваем текст на слова, например Облонского Степана Аркадьича -> облонский степан аркадьевич
+    res = list()
+    for word in words:
+        p = MORPH.parse(word)[0]
+        res.append(p.normal_form) # наверное можно сразу строку возвращать, чтобы в триплете не преобразовывать
 
+    return ' '.join(res)
+
+
+
+def segmentation_text(text: str) -> list[dict]:
+    '''
+    Сегментация текста на предложения
+    Используем предобучение модели из библиотеки Natasha
+    Извлекаем именованные сущности из каждого предложения, формируем общий список триплетов (словарей)
+    '''
+    segmenter = Segmenter()
+    doc = Doc(text)
+    doc.segment(segmenter)
+    
     navec = Navec.load('navec_news_v1_1B_250K_300d_100q.tar')
     ner = NER.load('slovnet_ner_news_v1.tar')
     ner.navec(navec)
 
-    ##### Подключаем функцию сегментации текста
-
-    segmenter = Segmenter()
-    doc = Doc(text)
-    doc.segment(segmenter)
-
-    named_triplets = [] # тут будет список словарей
-
-    
-
-
-    ##### Извлекаем именованные сущности из каждого предложения, формируем общий список триплетов (словарей)
 
     sents = list(segmenter.sentenize(text))
-
+    named_triplets = [] # тут будет список словарей
     for sent in sents:
         markup = ner(sent.text)
-        if len(markup.spans):
-            for i in range(len(markup.spans)):
-                triplet_dict = {
-                    'type':markup.spans[i].type, 
-                    'name':markup.text[markup.spans[i].start:markup.spans[i].stop], 
-                    'context':markup.text
-                }
-                named_triplets.append(triplet_dict)
+        if  not markup.spans:
+            continue
+        for i in range(len(markup.spans)):
+            start = markup.spans[i].start
+            stop = markup.spans[i].stop
+            list_lemmatized_names = lemmatization_of_word(markup.text[start:stop]) 
+            triplet_dict = {
+                'type':markup.spans[i].type, 
+                'name': list_lemmatized_names,
+                'context':markup.text
+            }
+            named_triplets.append(triplet_dict)
+    logger.info('-----------------------Сегментацию и лемматизацию выполнил-----------------------')
+    return named_triplets
 
 
-    #named_triplets
 
-
-
-
-
-
-
-    ##### Лемматизация name для каждого триплета
-
-    morph = pymorphy2.MorphAnalyzer() # для лемматизации
-
-    # функция лемматизации
-    def lemmatize(name):
-        words = name.split() # разбиваем текст на слова
-        res = list()
-        for word in words:
-            p = morph.parse(word)[0]
-            res.append(p.normal_form)
-
-        return res
-
-    for i in range(len(named_triplets)):
-        p = lemmatize(named_triplets[i].get('name'))
-        named_triplets[i].update({'name': p[0]})
-
-    #named_triplets
-
-    ##### Удаляем дубликаты триплетов, формируем множество
-
+def delete_repeatable_entities(named_triplets: list[str]) -> set:
+    '''
+    Удаляем дубликаты триплетов
+    Формируем множество уникальных именованных сущностей
+    '''
     unic_names = set()
     for i in range(len(named_triplets)):
-        if named_triplets[i].get('name') in unic_names:
-            continue
-        else:
-            unic_names.add(named_triplets[i].get('name'))
+        name = named_triplets[i].get('name')
+        if name not in unic_names:
+            unic_names.add(name)
+            
+    logger.info('----------------------------Удалил дубликаты-------------------------------------')
+    return unic_names      
 
-    #unic_names
 
-    ##### творим магию-хуягию
 
-    # составим список количесва вхождений каждой уникальной сущности для того, чтобы потом оставить по три предложения для каждого
+def count_quantity_of_entities(unic_names: set, named_triplets: list[dict]) -> list[dict]:
+    '''
+    составим список количесва вхождений каждой уникальной сущности для того, 
+    чтобы потом оставить по три предложения для каждого
+    '''
+ 
     count_named_triplets = list()
     for name in unic_names:
         quantity = 0
         for  i in range(len(named_triplets)):
             if name == named_triplets[i].get('name'):
                 quantity += 1
-        d = {'name': name, 'quantity': quantity}
+        d = {
+            'name': name, 
+            'quantity': quantity
+            }
         count_named_triplets.append(d)
+    logger.info('---------------Подсчитал количество вхождений именованных сущностей--------------')
+    
+    return count_named_triplets
 
-    #count_named_triplets
 
-    ##### Составляем финальный список триплетов, содержащий уникальные имена и контекст не более трех предложений из текста
+def create_named_entities(count_named_triplets: list[dict], named_triplets: list[dict]) -> list[dict]:
+    '''
+    Составляем финальный список триплетов, содержащий уникальные имена и контекст не более трех предложений из текста
+    '''
 
     unic_named_triplets = list()
 
@@ -149,25 +158,30 @@ def extract_entities(filename):
                     'context':context
                 }
         unic_named_triplets.append(triplet_dict)
-            
-            
-
-    #unic_named_triplets
-
-
-
-    ##### Формируем итоговый json файл, кладем туда список триплетов - unic_named_triplets
-
-    
-    # JSON_string = json.dumps(unic_named_triplets, ensure_ascii=False, indent=4).encode('utf8')
-
-    # filename = "anna-karenina.json"
-    # with open(filename, 'w') as file_object:
-    #     file_object.write(JSON_string.decode())
-
-    
-
+    logger.info('---------------------------Собрал именованные сущности---------------------------')  
     return unic_named_triplets
 
-print(extract_entities('test.txt'))
+
+
+
+
+def index(text: str) -> list[dict]:
+    named_triplets: list[str] = segmentation_text(text)    
+    # named_triplets_lemmatized: list[dict] = lemmatization(named_triplets)
+    unic_names: set = delete_repeatable_entities(named_triplets)
+    count_named_triplets: list[dict] = count_quantity_of_entities(unic_names, named_triplets)
+    unic_named_triplets: list[dict] = create_named_entities(count_named_triplets, named_triplets)
+    return unic_named_triplets
+
+
+
+
+logger.info('--------------------------------------СТАРТ--------------------------------------')          
+INPUT_FILENAME = 'anna-karenina.txt'
+#INPUT_FILENAME = 'test.txt'
+text: str = read_file(INPUT_FILENAME)
+index(text)
+logger.info('--------------------------------------КОНЕЦ--------------------------------------')
+
+
 
