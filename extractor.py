@@ -48,49 +48,63 @@ def lemmatization_of_word(text: str) -> str:
 
 
 def segmentation_text(text: str) -> list[dict]:
+    '''
+    Сегментация текста на предложения
+    Используем предобучение модели из библиотеки Natasha
+    Извлекаем именованные сущности из каждого предложения, формируем общий список триплетов (словарей)
+    '''
     segmenter = Segmenter()
     doc = Doc(text)
     doc.segment(segmenter)
     
-    ##### Используем предобучение модели из библиотеки Natasha
     navec = Navec.load('navec_news_v1_1B_250K_300d_100q.tar')
     ner = NER.load('slovnet_ner_news_v1.tar')
     ner.navec(navec)
 
-    ##### Извлекаем именованные сущности из каждого предложения, формируем общий список триплетов (словарей)
+
     sents = list(segmenter.sentenize(text))
     named_triplets = [] # тут будет список словарей
     for sent in sents:
         markup = ner(sent.text)
-        if len(markup.spans):
-            for i in range(len(markup.spans)):
-                list_lemmatized_names = lemmatization_of_word(markup.text[markup.spans[i].start:markup.spans[i].stop]) 
-                triplet_dict = {
-                    'type':markup.spans[i].type, 
-                    'name': list_lemmatized_names,
-                    'context':markup.text
-                }
-                named_triplets.append(triplet_dict)
+        if  not markup.spans:
+            continue
+        for i in range(len(markup.spans)):
+            start = markup.spans[i].start
+            stop = markup.spans[i].stop
+            list_lemmatized_names = lemmatization_of_word(markup.text[start:stop]) 
+            triplet_dict = {
+                'type':markup.spans[i].type, 
+                'name': list_lemmatized_names,
+                'context':markup.text
+            }
+            named_triplets.append(triplet_dict)
     logger.info('-----------------------Сегментацию и лемматизацию выполнил-----------------------')
     return named_triplets
 
 
 
 def delete_repeatable_entities(named_triplets: list[str]) -> set:
-##### Удаляем дубликаты триплетов, формируем множество
+    '''
+    Удаляем дубликаты триплетов
+    Формируем множество уникальных именованных сущностей
+    '''
     unic_names = set()
     for i in range(len(named_triplets)):
-        if named_triplets[i].get('name') in unic_names:
-            continue
-        else:
-            unic_names.add(named_triplets[i].get('name'))
+        name = named_triplets[i].get('name')
+        if name not in unic_names:
+            unic_names.add(name)
+            
     logger.info('----------------------------Удалил дубликаты-------------------------------------')
     return unic_names      
 
 
 
 def count_quantity_of_entities(unic_names: set, named_triplets: list[dict]) -> list[dict]:
-    # составим список количесва вхождений каждой уникальной сущности для того, чтобы потом оставить по три предложения для каждого
+    '''
+    составим список количесва вхождений каждой уникальной сущности для того, 
+    чтобы потом оставить по три предложения для каждого
+    '''
+ 
     count_named_triplets = list()
     for name in unic_names:
         quantity = 0
@@ -108,7 +122,9 @@ def count_quantity_of_entities(unic_names: set, named_triplets: list[dict]) -> l
 
 
 def create_named_entities(count_named_triplets: list[dict], named_triplets: list[dict]) -> list[dict]:
-   ##### Составляем финальный список триплетов, содержащий уникальные имена и контекст не более трех предложений из текста
+    '''
+    Составляем финальный список триплетов, содержащий уникальные имена и контекст не более трех предложений из текста
+    '''
 
     unic_named_triplets = list()
 
